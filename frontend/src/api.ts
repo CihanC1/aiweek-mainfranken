@@ -1,5 +1,5 @@
 import type {User} from './types';
-const BASE=import.meta.env.VITE_API_URL??'http://localhost:8080';
+const BASE=(import.meta.env.VITE_API_URL??'').replace(/\/+$/,'');
 export class ApiError extends Error{constructor(public status:number,message:string,public code?:string){super(message)}}
 let refreshPromise:Promise<boolean>|null=null;
 async function raw<T>(path:string,init:RequestInit={},retry=true):Promise<T>{

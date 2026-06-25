@@ -6,12 +6,14 @@ import de.mainfrankenit.events.domain.AttendanceMode;
 import de.mainfrankenit.events.domain.Event;
 import de.mainfrankenit.events.domain.EventChange;
 import de.mainfrankenit.events.domain.EventStatus;
+import de.mainfrankenit.events.domain.EventSource;
 import de.mainfrankenit.events.domain.EventType;
 import de.mainfrankenit.identity.application.UserService;
 import de.mainfrankenit.notifications.adapter.out.whatsapp.WhatsAppPort;
 import de.mainfrankenit.notifications.application.NotificationService;
 import de.mainfrankenit.notifications.domain.DeliveryChannel;
 import de.mainfrankenit.notifications.domain.DeliveryStatus;
+import de.mainfrankenit.notifications.domain.Notification;
 import de.mainfrankenit.notifications.domain.NotificationDelivery;
 import de.mainfrankenit.notifications.domain.NotificationType;
 import io.quarkus.test.TestTransaction;
@@ -35,7 +37,10 @@ class CoreServiceIntegrationTest {
     void keywordSearchRecordsHistoryAndMatchesTags(){importer.upsert(draft("first","Würzburg"));var user=users.create("Search User");var found=search.events("cloud",user.id);assertTrue(found.stream().anyMatch(e->e.title().contains("Unique Integration")));assertEquals(1,UserSearch.count("user",user));}
 
     @Test @TestTransaction
-    void updatesPreferencesAndCreatesNotification(){var user=users.create("Notify User");users.preferences(user.id,"Würzburg",Set.of(EventType.MEETUP),AttendanceMode.OFFLINE);assertEquals("Würzburg",user.preferredCity);importer.upsert(draft("first","Würzburg"));Event event=Event.find("sourceUrl","https://integration.example/event/unique").firstResult();var n=notifications.create(user,event,NotificationType.MATCHING_EVENT,"Match","A matching event");assertNotNull(n.id);assertEquals(1,NotificationDelivery.count("notification",n));}
+    void newEventsNotifyOptedInUsers(){var user=users.create("Notify User");users.optIn(user.id,"+491234567892",true);assertEquals(1,importer.upsert(draft("first","Würzburg")));Event event=Event.find("sourceUrl","https://integration.example/event/unique").firstResult();Notification notification=Notification.find("user=?1 and event=?2 and type=?3",user,event,NotificationType.NEW_EVENT).firstResult();assertNotNull(notification);assertTrue(notification.body.contains("Check it out"));NotificationDelivery delivery=NotificationDelivery.find("notification",notification).firstResult();assertNotNull(delivery);assertEquals(DeliveryChannel.WHATSAPP,delivery.channel);assertEquals(DeliveryStatus.SENT,delivery.status);}
+
+    @Test @TestTransaction
+    void cancellingMissingEventsNotifiesUsers(){var user=users.create("Cancel User");users.optIn(user.id,"+491234567893",true);assertEquals(1,importer.upsert(draft("first","Würzburg")));Event event=Event.find("sourceUrl","https://integration.example/event/unique").firstResult();var source=new EventSource();source.name=event.sourceName;source.url="https://integration.example/events";source.parserKey="generic";source.persist();assertEquals(1,importer.cancelMissingEvents(source,Set.of()));assertEquals(EventStatus.CANCELLED,event.status);Notification notification=Notification.find("user=?1 and event=?2 and type=?3",user,event,NotificationType.EVENT_CANCELLED).firstResult();assertNotNull(notification);assertTrue(notification.body.contains("no longer available"));}
 
     @Test @TestTransaction
     void guidedChatPersistsMessages(){var user=users.create("Chat User");var started=chat.start(user.id);assertEquals("ASK_TOPIC",started.state());var reply=chat.message(started.sessionId(),"java, ai");assertEquals("ASK_CITY",reply.state());assertEquals(3,ChatMessage.count("session.id",started.sessionId()));}

@@ -16,17 +16,34 @@ public class EventImportScheduler {
     boolean enabled;
 
     private Instant lastSuccessfulRun = Instant.EPOCH;
+    private volatile String pendingForcedTrigger;
 
     @Scheduled(every = "{event.import.interval}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void importEvents() {
         importNow("Scheduled");
     }
 
+    @Scheduled(every = "5s", delayed = "5s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void processPendingForcedImport() {
+        String trigger = pendingForcedTrigger;
+        if (trigger == null) return;
+        pendingForcedTrigger = null;
+        importNow(trigger, true);
+    }
+
+    public void requestForcedImport(String trigger) {
+        pendingForcedTrigger = trigger == null || trigger.isBlank() ? "Source file change" : trigger;
+    }
+
     public synchronized void importNow(String trigger) {
+        importNow(trigger, false);
+    }
+
+    public synchronized void importNow(String trigger, boolean force) {
         if (LaunchMode.current() == LaunchMode.TEST) return;
         if (!enabled) return;
-        if (Duration.between(lastSuccessfulRun, Instant.now()).compareTo(Duration.ofMinutes(1)) < 0) return;
-        var result = importer.run();
+        if (!force && Duration.between(lastSuccessfulRun, Instant.now()).compareTo(Duration.ofMinutes(1)) < 0) return;
+        var result = importer.run(force);
         if (result.sources() > 0) lastSuccessfulRun = Instant.now();
         LOG.infof("%s event import finished: sources=%d discovered=%d created=%d updated=%d unchanged=%d errors=%s",
                 trigger, result.sources(), result.discovered(), result.created(), result.updated(), result.unchanged(), result.errors());
