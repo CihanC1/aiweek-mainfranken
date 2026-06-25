@@ -1,0 +1,8 @@
+export type EventType='MEETUP'|'WORKSHOP'|'CONFERENCE'|'HACKATHON'|'OTHER';
+export type AttendanceMode='ONLINE'|'OFFLINE'|'HYBRID';
+export interface EventItem{id:string;title:string;organizer?:string;description?:string;tags:string[];eventType:EventType;startAt:string;endAt?:string;locationName?:string;city:string;address?:string;attendanceMode:AttendanceMode;sourceUrl:string;sourceName:string;status:string}
+export interface User{id:string;displayName:string;email?:string;phoneNumber?:string;whatsappOptIn:boolean;preferredCity?:string;preferredEventTypes:EventType[];attendanceMode?:AttendanceMode;role?:string;interests:string[]}
+export interface Recommendation{event:EventItem;score:number;group:'BEST'|'MEDIUM'|'RELATED';reasons:string[]}
+export interface ChatReply{sessionId:string;state:string;message:string;completed:boolean}
+export interface GroupMessage{id:string;userId?:string;author:string;role:'USER'|'ASSISTANT'|'SYSTEM';content:string;createdAt:string}
+export interface Group{id:string;eventId:string;name:string;memberIds:string[];messages:GroupMessage[]}

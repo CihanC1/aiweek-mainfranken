@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mainfrankenit}
+      POSTGRES_USER: ${POSTGRES_USER:-mainfrankenit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mainfrankenit}
+    ports: ["5433:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+  backend:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      QUARKUS_PROFILE: docker
+      POSTGRES_DB: ${POSTGRES_DB:-mainfrankenit}
+      POSTGRES_USER: ${POSTGRES_USER:-mainfrankenit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mainfrankenit}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      EVENT_SOURCES_FILE: ${EVENT_SOURCES_FILE:-event-sources.csv}
+      EVENT_IMPORT_ENABLED: ${EVENT_IMPORT_ENABLED:-true}
+      EVENT_IMPORT_RUN_AT_START: ${EVENT_IMPORT_RUN_AT_START:-true}
+      EVENT_IMPORT_INTERVAL: ${EVENT_IMPORT_INTERVAL:-30m}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-mock}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM:-whatsapp:+14155238886}
+    ports: ["${API_PORT:-8082}:8080"]
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8082}
+    depends_on: [backend]
+    ports: ["3000:80"]
+volumes:
+  postgres_data:

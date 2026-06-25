@@ -1,0 +1,2 @@
+import{describe,expect,it}from'vitest';import{loginSchema,phoneSchema,registerSchema}from'./validation';
+describe('auth validation',()=>{it('rejects invalid login data',()=>expect(loginSchema.safeParse({email:'nope',password:'short'}).success).toBe(false));it('accepts valid registration',()=>expect(registerSchema.safeParse({displayName:'Ada',email:'ada@example.de',password:'sicher123'}).success).toBe(true));it('requires E.164 phone numbers',()=>{expect(phoneSchema.safeParse('+491234567890').success).toBe(true);expect(phoneSchema.safeParse('0123').success).toBe(false)})});

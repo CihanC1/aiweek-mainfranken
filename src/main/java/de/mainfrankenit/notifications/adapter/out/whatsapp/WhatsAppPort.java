@@ -1,0 +1,2 @@
+package de.mainfrankenit.notifications.adapter.out.whatsapp;
+public interface WhatsAppPort { SendResult send(String phoneNumber,String message); record SendResult(boolean success,String providerReference,String error){} }

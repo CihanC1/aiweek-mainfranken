@@ -1,0 +1,15 @@
+{
+    "java.configuration.updateBuildConfiguration": "interactive",
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5433,
+            "driver": "PostgreSQL",
+            "database": "mainfrankenit",
+            "username": "mainfrankenit",
+            "name": "MainFrankenIT Local"
+        }
+    ]
+}
