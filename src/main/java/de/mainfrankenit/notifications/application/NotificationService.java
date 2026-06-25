@@ -17,6 +17,7 @@ import java.util.Set;
 @ApplicationScoped
 public class NotificationService {
     @Inject WhatsAppPort whatsapp;
+    @Inject RecommendationService recommendations;
     @ConfigProperty(name="app.public-url", defaultValue="http://localhost:3000") String publicUrl;
 
     @Transactional
@@ -62,11 +63,18 @@ public class NotificationService {
 
     @Transactional
     public void eventCreated(Event event) {
-        for (AppUser user : AppUser.<AppUser>find("enabled=true").list()) {
-            create(user,event,NotificationType.NEW_EVENT,"New event online",
-                    "A new event is online that might interest you. Check it out:\n"+eventLink(event),
-                    "NEW_EVENT:"+user.id+":"+event.id);
+        for (AppUser user : AppUser.<AppUser>find("enabled=true and whatsappOptIn=true").list()) {
+            notifyMatchingUser(user,event);
         }
+    }
+
+    private void notifyMatchingUser(AppUser user, Event event) {
+        var recommendation = recommendations.score(event,recommendations.preferences(user));
+        boolean topicMatch = recommendation.reasons().stream().anyMatch(reason -> reason.startsWith("passende Themen:"));
+        if (!topicMatch) return;
+        create(user,event,NotificationType.MATCHING_EVENT,"Neues passendes Event",
+                event.title+" passt zu deinen Interessen.\nWann: "+event.startAt+"\nOrt: "+event.city+"\n"+eventLink(event),
+                "MATCHING_EVENT:"+user.id+":"+event.id);
     }
 
     @Transactional
