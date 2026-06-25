@@ -13,14 +13,16 @@ Configuration can be overridden with `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `CO
 
 ## Event sources
 
-Put crawl/import sources in `src/main/resources/event-sources.csv` using this format:
+Put crawl/import sources in `event-sources.csv` using this format:
 
 ```csv
 # name;url;parserKey;active
 AI Week Mainfranken;https://www.ai-week.de/programm.php;ai-week;true
 ```
 
-The file is loaded on backend startup and upserts sources by name. For AI Week, normal
+The file is loaded on backend startup and upserts sources by name. In Docker, `event-sources.csv`
+is mounted into the backend container, so editing the file triggers an automatic reload and a
+forced re-import without rebuilding the image. For AI Week, normal
 programme links are accepted; the importer automatically fetches the public timetable export.
 A detail link such as `https://www.ai-week.de/programm.php#/veranstaltung/83` imports only
 that one event, while `https://www.ai-week.de/programm.php` imports the full programme.
@@ -28,7 +30,9 @@ To use a different file outside the app bundle, set `EVENT_SOURCES_FILE=/path/to
 
 The backend imports active sources automatically on startup and then repeats the import every
 `EVENT_IMPORT_INTERVAL` (`30m` by default). Set `EVENT_IMPORT_ENABLED=false` to disable automatic
-imports, or `EVENT_IMPORT_RUN_AT_START=false` if startup should only load the source list.
+imports, or `EVENT_IMPORT_RUN_AT_START=false` if startup should only load the source list. Source
+file changes are polled every `EVENT_SOURCES_RELOAD_INTERVAL` (`15s` by default) and trigger a
+forced import. Missing events from a refreshed source are marked as cancelled and notify users.
 
 ## Frontend locally
 

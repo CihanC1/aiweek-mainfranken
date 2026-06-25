@@ -16,6 +16,9 @@ services:
     build: .
     depends_on:
       db: { condition: service_healthy }
+    volumes:
+      - ./event-sources.csv:/work/event-sources.csv:ro
+      - ./manual-events.csv:/work/manual-events.csv:ro
     environment:
       QUARKUS_PROFILE: docker
       POSTGRES_DB: ${POSTGRES_DB:-mainfrankenit}
@@ -26,6 +29,10 @@ services:
       EVENT_IMPORT_ENABLED: ${EVENT_IMPORT_ENABLED:-true}
       EVENT_IMPORT_RUN_AT_START: ${EVENT_IMPORT_RUN_AT_START:-true}
       EVENT_IMPORT_INTERVAL: ${EVENT_IMPORT_INTERVAL:-30m}
+      EVENT_SOURCES_RELOAD_INTERVAL: ${EVENT_SOURCES_RELOAD_INTERVAL:-15s}
+      EVENT_MANUAL_ENABLED: ${EVENT_MANUAL_ENABLED:-true}
+      EVENT_MANUAL_FILE: ${EVENT_MANUAL_FILE:-manual-events.csv}
+      EVENT_MANUAL_NOTIFY: ${EVENT_MANUAL_NOTIFY:-false}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
       WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-mock}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
@@ -36,7 +43,7 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8082}
+        VITE_API_URL: ${VITE_API_URL-}
     depends_on: [backend]
     ports: ["3000:80"]
 volumes:

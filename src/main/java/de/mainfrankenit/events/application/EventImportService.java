@@ -28,7 +28,7 @@ import java.util.*;
 public class EventImportService {
     private static final Logger LOG = Logger.getLogger(EventImportService.class);
     private static final int MAX_PAGES_PER_SOURCE = 10;
-    private static final Set<String> MEANINGFUL_NOTIFICATION_FIELDS = Set.of("title","eventType","startAt","endAt","locationName","city","address","attendanceMode");
+    private static final Set<String> MEANINGFUL_NOTIFICATION_FIELDS = Set.of("title","eventType","startAt","endAt","locationName","city","address","attendanceMode","status");
     @Inject EventNormalizer normalizer;
     @Inject HttpPageFetcher fetcher;
     @Inject ContentHasher hasher;
@@ -56,23 +56,33 @@ public class EventImportService {
                 var parser = parsers.stream().filter(p -> p.key().equals(source.parserKey)).findFirst()
                         .orElseThrow(() -> new IllegalArgumentException("Unknown parser: " + source.parserKey));
                 int sourceEvents=0, sourceCreated=0, sourceUpdated=0, sourceUnchanged=0, fetched=0;
+                boolean parsedPrimaryPage = false;
+                var seenSourceUrls = new LinkedHashSet<String>();
                 for (var pageUrl : pageUrls(source)) {
-                    var page = fetcher.fetch(EventSourceUrls.importUrl(pageUrl, source.parserKey));
-                    fetched++;
-                    boolean changed = markPageChecked(source, pageUrl, page);
-                    if (!changed) continue;
-                    var parsed = parser.parse(page, source);
-                    if (!"ai-week".equals(source.parserKey)) parsed = jsonLd.parse(page, source).merge(parsed);
-                    rememberLinks(source, links.discover(page, MAX_PAGES_PER_SOURCE));
-                    for (var draft : parsed.events()) {
-                        discovered++; sourceEvents++;
-                        var outcome = upsert(draft);
-                        if (outcome == 1) { created++; sourceCreated++; }
-                        else if (outcome == 2) { updated++; sourceUpdated++; }
-                        else { unchanged++; sourceUnchanged++; }
+                    try {
+                        var page = fetcher.fetch(EventSourceUrls.importUrl(pageUrl, source.parserKey));
+                        fetched++;
+                        boolean shouldParse = force || markPageChecked(source, pageUrl, page);
+                        if (!shouldParse) continue;
+                        if (Objects.equals(pageUrl, source.url)) parsedPrimaryPage = true;
+                        var parsed = parser.parse(page, source);
+                        if (!"ai-week".equals(source.parserKey)) parsed = jsonLd.parse(page, source).merge(parsed);
+                        rememberLinks(source, links.discover(page, MAX_PAGES_PER_SOURCE));
+                        for (var draft : parsed.events()) {
+                            seenSourceUrls.add(normalizeSourceUrl(draft.sourceUrl()));
+                            discovered++; sourceEvents++;
+                            var outcome = upsert(draft);
+                            if (outcome == 1) { created++; sourceCreated++; }
+                            else if (outcome == 2) { updated++; sourceUpdated++; }
+                            else { unchanged++; sourceUnchanged++; }
+                        }
+                        if (!parsed.warnings().isEmpty()) LOG.debugf("Parser warnings for %s: %s", page.url(), parsed.warnings());
+                    } catch (RuntimeException pageError) {
+                        if (Objects.equals(pageUrl, source.url)) throw pageError;
+                        rememberPageFailure(source, pageUrl, pageError);
                     }
-                    if (!parsed.warnings().isEmpty()) LOG.debugf("Parser warnings for %s: %s", page.url(), parsed.warnings());
                 }
+                if (parsedPrimaryPage) cancelMissingEvents(source, seenSourceUrls);
                 source.consecutiveFailures=0; source.lastError=null; source.lastSuccessAt=Instant.now(); scheduleNext(source);
                 sourceRun.fetchedUrlCount=fetched; sourceRun.eventCount=sourceEvents; sourceRun.createdCount=sourceCreated; sourceRun.updatedCount=sourceUpdated; sourceRun.unchangedCount=sourceUnchanged; sourceRun.status=ImportRunStatus.SUCCESS;
             } catch (RuntimeException e) { errors.add(source.name + ": " + e.getMessage()); }
@@ -94,11 +104,25 @@ public class EventImportService {
     /** 1 created, 2 updated, 0 unchanged. Public for deterministic import/test adapters. */
     @Transactional
     public int upsert(EventDraft raw) {
+        return upsert(raw, true);
+    }
+
+    @Transactional
+    public int upsert(EventDraft raw, boolean notify) {
         var d = normalizer.normalize(raw);
         var fingerprint = normalizer.fingerprint(d);
         Event event = Event.find("fingerprint = ?1 or sourceUrl = ?2", fingerprint, d.sourceUrl()).firstResult();
-        if (event == null) { event = new Event(); apply(event, d, fingerprint); event.persist(); notifications.eventCreated(event); return 1; }
+        if (event == null) {
+            event = new Event();
+            apply(event, d, fingerprint);
+            event.persist();
+            if (notify) notifications.eventCreated(event);
+            return 1;
+        }
         var changes = changes(event, d);
+        if (event.status == EventStatus.CANCELLED || event.status == EventStatus.ARCHIVED) {
+            changes.put("status", new String[]{event.status.name(), EventStatus.ACTIVE.name()});
+        }
         event.lastCheckedAt = Instant.now();
         if (changes.isEmpty()) return 0;
         for (var entry : changes.entrySet()) {
@@ -106,7 +130,7 @@ public class EventImportService {
             change.oldValue=values[0]; change.newValue=values[1]; change.detectedAt=Instant.now(); change.persist();
         }
         apply(event, d, fingerprint); event.status = EventStatus.UPDATED;
-        if (changes.keySet().stream().anyMatch(MEANINGFUL_NOTIFICATION_FIELDS::contains)) notifications.eventUpdated(event, changes.keySet());
+        if (notify && changes.keySet().stream().anyMatch(MEANINGFUL_NOTIFICATION_FIELDS::contains)) notifications.eventUpdated(event, changes.keySet());
         return 2;
     }
 
@@ -137,6 +161,18 @@ public class EventImportService {
         var oldTags=normalizeTags(oldV); var newTags=normalizeTags(newV);
         if (!Objects.equals(oldTags,newTags)) m.put(field,new String[]{Objects.toString(oldV,null),Objects.toString(newV,null)});
     }
+    int cancelMissingEvents(EventSource source, Set<String> seenSourceUrls) {
+        int cancelled = 0;
+        for (Event event : Event.<Event>list("sourceName = ?1 and status in (?2, ?3) and startAt >= ?4",
+                source.name, EventStatus.ACTIVE, EventStatus.UPDATED, OffsetDateTime.now())) {
+            if (seenSourceUrls.contains(normalizeSourceUrl(event.sourceUrl))) continue;
+            event.status = EventStatus.CANCELLED;
+            event.lastCheckedAt = Instant.now();
+            notifications.eventCancelled(event);
+            cancelled++;
+        }
+        return cancelled;
+    }
     private Instant toInstant(OffsetDateTime value) { return value == null ? null : value.toInstant(); }
     private Set<String> normalizeTags(Set<String> tags) {
         if (tags == null) return Set.of();
@@ -144,6 +180,7 @@ public class EventImportService {
         for (String tag : tags) { var value=normalizer.text(tag); if(!value.isBlank()) result.add(value); }
         return result;
     }
+    private String normalizeSourceUrl(String url) { return url == null ? "" : url.trim(); }
 
     private List<String> pageUrls(EventSource source) {
         var urls = new LinkedHashSet<String>();
@@ -175,6 +212,21 @@ public class EventImportService {
             if (SourcePage.count("source=?1 and url=?2", source, link.url()) > 0) continue;
             var page = new SourcePage(); page.source=source; page.url=link.url(); page.pageType=link.type(); page.active=true; page.persist();
         }
+    }
+
+    private void rememberPageFailure(EventSource source, String requestedUrl, RuntimeException error) {
+        SourcePage sourcePage = SourcePage.find("source=?1 and url=?2", source, requestedUrl).firstResult();
+        if (sourcePage == null) {
+            sourcePage = new SourcePage();
+            sourcePage.source = source;
+            sourcePage.url = requestedUrl;
+            sourcePage.pageType = SourcePageType.UNKNOWN;
+            sourcePage.active = true;
+        }
+        sourcePage.lastCheckedAt = Instant.now();
+        sourcePage.lastError = error.getMessage();
+        sourcePage.persist();
+        LOG.debugf(error, "Skipping discovered page %s for source %s", requestedUrl, source.name);
     }
 
     private Instant parseHttpDate(String value) {
