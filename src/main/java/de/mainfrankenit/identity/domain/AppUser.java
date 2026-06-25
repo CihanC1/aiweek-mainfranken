@@ -17,4 +17,7 @@ public class AppUser extends BaseEntity {
     @Enumerated(EnumType.STRING) public AttendanceMode preferredAttendanceMode;
     @ElementCollection(fetch=FetchType.EAGER) @CollectionTable(name="user_preferred_event_types", joinColumns=@JoinColumn(name="user_id")) @Enumerated(EnumType.STRING) @Column(name="event_type")
     public Set<EventType> preferredEventTypes = new LinkedHashSet<>();
+    public String profileLink1;
+    public String profileLink2;
+    public String profileLink3;
 }

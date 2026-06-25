@@ -1,10 +1,12 @@
 package de.mainfrankenit.assistant.application;
 import de.mainfrankenit.assistant.domain.ChatMessage;
 import de.mainfrankenit.assistant.domain.ChatSession;
+import de.mainfrankenit.events.application.TaxonomyService;
 import de.mainfrankenit.events.domain.AttendanceMode;
 import de.mainfrankenit.events.domain.EventType;
 import de.mainfrankenit.identity.application.UserService;
 import de.mainfrankenit.identity.domain.AppUser;
+import de.mainfrankenit.identity.domain.UserInterest;
 import de.mainfrankenit.notifications.application.NotificationService;
 import de.mainfrankenit.notifications.domain.NotificationType;
 import de.mainfrankenit.recommendations.application.RecommendationService;
@@ -22,25 +24,58 @@ public class ChatService {
     @Inject UserService users;
     @Inject RecommendationService recommendations;
     @Inject NotificationService notifications;
+    @Inject TaxonomyService taxonomy;
     @ConfigProperty(name="app.public-url", defaultValue="http://localhost:3000") String publicUrl;
     public record Reply(UUID sessionId,String state,String message,boolean completed){}
-    @Transactional public Reply start(UUID userId){var s=new ChatSession();s.user=userId==null?null:users.get(userId);s.persist();return assistant(s,"Hangi teknoloji konularıyla ilgileniyorsunuz? (Örn. Java, AI, SQL)");}
+    @Transactional public Reply start(UUID userId){var s=new ChatSession();s.user=userId==null?null:users.get(userId);s.persist();return assistant(s,"Für welche Technologiethemen interessierst du dich? (z. B. Java, AI, SQL)");}
     @Transactional public Reply message(UUID id,String content){ChatSession s=ChatSession.findById(id);if(s==null)throw new NotFoundException("Chat session not found");save(s,ChatRole.USER,content);
         String response;
         switch(s.state){
-            case "ASK_TOPIC"->{ensureUser(s);users.interests(s.user.id,new LinkedHashSet<>(Arrays.asList(content.split("\\s*,\\s*|\\s+ve\\s+"))));s.state="ASK_CITY";response="Hangi şehri tercih edersiniz?";}
-            case "ASK_CITY"->{s.user.preferredCity=content.trim();s.state="ASK_TYPE";response="Meetup, workshop, konferans veya hackathon seçeneklerinden hangileri size uygun?";}
-            case "ASK_TYPE"->{var types=new LinkedHashSet<EventType>();for(String token:content.split("[, ]+"))try{types.add(EventType.valueOf(token.trim().toUpperCase(Locale.ROOT).replace("KONFERANS","CONFERENCE")));}catch(Exception ignored){}s.user.preferredEventTypes.clear();s.user.preferredEventTypes.addAll(types);s.state="ASK_MODE";response="Online, yüz yüze veya hibrit etkinlikleri mi tercih edersiniz?";}
-            case "ASK_MODE"->{String c=content.toLowerCase(Locale.ROOT);s.user.preferredAttendanceMode=c.contains("hib")?AttendanceMode.HYBRID:c.contains("online")?AttendanceMode.ONLINE:AttendanceMode.OFFLINE;s.state="ASK_WHATSAPP";response=recommendationText(s.user)+"\n\nWhatsApp üzerinden düzenli etkinlik bildirimleri almak ister misiniz?";}
-            case "ASK_WHATSAPP"->{if(yes(content)){s.state="ASK_PHONE";response="Lütfen telefon numaranızı ülke koduyla yazın (örn. +491234567890).";}else{s.state="COMPLETED";s.completed=true;response="Tamamdır. Etkinlik önerilerinizi burada bıraktım:\n\n"+recommendationText(s.user);}}
-            case "ASK_PHONE"->{if(!content.matches("^\\+[1-9][0-9]{7,14}$"))response="Numara E.164 biçiminde olmalı (örn. +491234567890).";else{s.user=users.optIn(s.user.id,content,true);var text=recommendationText(s.user);notifications.create(s.user,null,NotificationType.MATCHING_EVENT,"Size uygun etkinlikler",text);s.state="COMPLETED";s.completed=true;response="WhatsApp bildirimleri açık. Bu önerileri WhatsApp'a da gönderdim:\n\n"+text;}}
-            default -> response="Bu sohbet tamamlandı. Önerilerinizi görüntüleyebilirsiniz.";
+            case "ASK_TOPIC"->{ensureUser(s);var topics=extractTopics(content);users.replaceInterests(s.user,topics);s.state="ASK_CITY";response=(topics.isEmpty()?"Ich konnte noch kein klares Thema erkennen. Du kannst später im Profil Tags wie AI, SQL oder Python ergänzen.":"Ich habe diese Themen erkannt: "+String.join(", ",topics)+".")+" Welche Stadt bevorzugst du?";}
+            case "ASK_CITY"->{var city=extractCity(content);s.user.preferredCity=city;s.state="ASK_TYPE";response=(city==null?"Alles klar, ich lasse die Stadt offen.":"Alles klar, ich filtere nach "+city+".")+" Welche Formate passen zu dir: Meetup, Workshop, Konferenz oder Hackathon?";}
+            case "ASK_TYPE"->{var types=extractTypes(content);s.user.preferredEventTypes.clear();s.user.preferredEventTypes.addAll(types);s.state="ASK_MODE";response=(types.isEmpty()?"Ich lasse den Event-Typ offen.":"Ich habe diese Event-Typen erkannt: "+typeLabels(types)+".")+" Bevorzugst du Online-, Vor-Ort- oder hybride Events?";}
+            case "ASK_MODE"->{s.user.preferredAttendanceMode=extractMode(content);s.state="ASK_WHATSAPP";response=recommendationText(s.user)+"\n\nMöchtest du regelmäßige Event-Benachrichtigungen per WhatsApp erhalten?";}
+            case "ASK_WHATSAPP"->{if(yes(content)){s.state="ASK_PHONE";response="Bitte gib deine Telefonnummer mit Ländercode ein (z. B. +491234567890).";}else{s.state="COMPLETED";s.completed=true;response="Alles klar. Hier sind deine Event-Empfehlungen:\n\n"+recommendationText(s.user);}}
+            case "ASK_PHONE"->{if(!content.matches("^\\+[1-9][0-9]{7,14}$"))response="Die Nummer muss im E.164-Format sein (z. B. +491234567890).";else{s.user=users.optIn(s.user.id,content,true);var text=recommendationText(s.user);notifications.create(s.user,null,NotificationType.MATCHING_EVENT,"Passende Events für dich",text);s.state="COMPLETED";s.completed=true;response="WhatsApp-Benachrichtigungen sind aktiviert. Diese Empfehlungen habe ich dir auch per WhatsApp geschickt:\n\n"+text;}}
+            default -> response="Dieser Chat ist abgeschlossen. Du kannst deine Empfehlungen im Profil ansehen.";
         }
         return assistant(s,response);
     }
     private void ensureUser(ChatSession s){if(s.user==null)s.user=users.create(null);}
-    private boolean yes(String value){String v=value.toLowerCase(Locale.ROOT);return v.equals("evet")||v.equals("yes")||v.equals("ja")||v.equals("e");}
+    private boolean yes(String value){String v=value.toLowerCase(Locale.ROOT);return v.equals("evet")||v.equals("yes")||v.equals("ja")||v.equals("j")||v.equals("e");}
     private Reply assistant(ChatSession s,String text){save(s,ChatRole.ASSISTANT,text);return new Reply(s.id,s.state,text,s.completed);}
     private void save(ChatSession s,ChatRole role,String content){var m=new ChatMessage();m.session=s;m.role=role;m.content=content;m.persist();}
-    private String recommendationText(AppUser user){var recs=recommendations.forUser(user.id).stream().limit(5).toList();if(recs.isEmpty())return "Şu an tercihlerinizle eşleşen güncel etkinlik bulamadım. Yeni etkinlikler içeri alındığında tekrar deneyebilirsiniz.";var lines=new ArrayList<String>();lines.add("Size uygun etkinlikler:");for(var r:recs){var e=r.event();lines.add("- "+e.title()+" ("+EVENT_TIME.format(e.startAt())+", "+e.city()+")");lines.add("  "+publicUrl.replaceAll("/+$","")+"/events/"+e.id());}return String.join("\n",lines);}
+    private String recommendationText(AppUser user){var recs=recommendations.forUser(user.id).stream().limit(5).toList();var interests=UserInterest.<UserInterest>find("user",user).list().stream().map(i->i.tag).toList();if(recs.isEmpty())return interests.isEmpty()?"Ich habe aktuell keine Events gefunden, die genau zu deinen Präferenzen passen. Sobald neue Events importiert werden, lohnt sich ein erneuter Blick.":"Ich habe aktuell keine Events gefunden, die zu diesen Themen passen: "+String.join(", ",interests)+". Du kannst einzelne Themen entfernen oder breitere Tags wie AI, Data Engineering oder Cloud probieren.";var lines=new ArrayList<String>();lines.add("Passende Events für dich:");for(var r:recs){var e=r.event();lines.add("- "+e.title()+" ("+EVENT_TIME.format(e.startAt())+", "+e.city()+")");lines.add("  "+publicUrl.replaceAll("/+$","")+"/events/"+e.id());}return String.join("\n",lines);}
+    private Set<String> extractTopics(String content) {
+        var result = new LinkedHashSet<>(taxonomy.extractTerms(content));
+        for (var token : normalize(content).split("[^\\p{L}\\p{N}+#.]+")) {
+            if (token.length() >= 2 && !STOPWORDS.contains(token)) result.add(token);
+        }
+        return result;
+    }
+    private String extractCity(String content) {
+        var c=content.trim();
+        if(c.isBlank()||normalize(c).matches(".*\\b(egal|keine|online|remote|anywhere|any|no preference)\\b.*"))return null;
+        return c;
+    }
+    private Set<EventType> extractTypes(String content) {
+        var c=normalize(content);var types=new LinkedHashSet<EventType>();
+        if(c.contains("meetup"))types.add(EventType.MEETUP);
+        if(c.contains("workshop"))types.add(EventType.WORKSHOP);
+        if(c.contains("konferenz")||c.contains("conference")||c.contains("konferans"))types.add(EventType.CONFERENCE);
+        if(c.contains("hackathon"))types.add(EventType.HACKATHON);
+        return types;
+    }
+    private AttendanceMode extractMode(String content) {
+        var c=normalize(content);
+        if(c.contains("hybrid")||c.contains("hibrit"))return AttendanceMode.HYBRID;
+        if(c.contains("online")||c.contains("remote"))return AttendanceMode.ONLINE;
+        if(c.contains("offline")||c.contains("vor ort")||c.contains("präsenz")||c.contains("praesenz"))return AttendanceMode.OFFLINE;
+        return null;
+    }
+    private String typeLabels(Set<EventType> types) {
+        return String.join(", ",types.stream().map(t->switch(t){case MEETUP->"Meetup";case WORKSHOP->"Workshop";case CONFERENCE->"Konferenz";case HACKATHON->"Hackathon";default->"Event";}).toList());
+    }
+    private String normalize(String value){return value==null?"":value.toLowerCase(Locale.ROOT).replaceAll("\\s+"," ").trim();}
+    private static final Set<String> STOPWORDS=Set.of("ich","i","think","would","like","learn","lernen","something","about","etwas","ueber","über","und","and","oder","or","hmm","vielleicht","will","want","möchte","moechte","gerne","interessiere","interessiert","mich","zu","zum","zur","the","a","an","to","mit","for","für","fuer");
 }

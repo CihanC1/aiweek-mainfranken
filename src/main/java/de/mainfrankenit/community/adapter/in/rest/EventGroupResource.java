@@ -20,7 +20,7 @@ public class EventGroupResource {
     public record GroupView(UUID id,UUID eventId,String name,List<UUID> memberIds,List<MessageView> messages){}
     public record MessageView(UUID id,UUID userId,String author,ChatRole role,String content,Instant createdAt){}
     public record NewMessage(@NotBlank String message){}
-    @GET public GroupView get(@PathParam("eventId")UUID eventId){return view(group(eventId,false));}
+    @GET public GroupView get(@PathParam("eventId")UUID eventId){return view(group(eventId,true));}
     @POST @Path("/join") @Transactional public GroupView joinEndpoint(@PathParam("eventId")UUID eventId,@CookieParam("mf_access")String access){return join(eventId,auth.current(access).id);}
     @POST @Path("/leave") @Transactional public GroupView leave(@PathParam("eventId")UUID eventId,@CookieParam("mf_access")String access){var user=auth.current(access);var g=group(eventId,false);EventGroupMember.delete("group=?1 and user=?2",g,user);return view(g);}
     @POST @Path("/messages") @Transactional public GroupView message(@PathParam("eventId")UUID eventId,@CookieParam("mf_access")String access,@Valid NewMessage body){var user=auth.current(access);var g=group(eventId,false);if(EventGroupMember.count("group=?1 and user=?2",g,user)==0)throw new ForbiddenException("Join the event group before sending messages.");var m=new EventGroupMessage();m.group=g;m.user=user;m.role=ChatRole.USER;m.content=body.message.trim();m.persist();return view(g);}

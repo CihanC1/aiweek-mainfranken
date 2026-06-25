@@ -10,6 +10,8 @@ public class Event extends BaseEntity {
     @Column(columnDefinition="text") public String description;
     @ElementCollection(fetch=FetchType.EAGER) @CollectionTable(name="event_tags", joinColumns=@JoinColumn(name="event_id")) @Column(name="tag")
     public Set<String> tags = new LinkedHashSet<>();
+    @ElementCollection(fetch=FetchType.EAGER) @CollectionTable(name="event_categories", joinColumns=@JoinColumn(name="event_id")) @Column(name="category")
+    public Set<String> categories = new LinkedHashSet<>();
     @Enumerated(EnumType.STRING) @Column(nullable=false) public EventType eventType = EventType.OTHER;
     @Column(nullable=false) public OffsetDateTime startAt;
     public OffsetDateTime endAt;

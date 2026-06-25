@@ -14,6 +14,8 @@ services:
       retries: 15
   backend:
     build: .
+    env_file:
+      - src/.env
     depends_on:
       db: { condition: service_healthy }
     volumes:
@@ -34,10 +36,6 @@ services:
       EVENT_MANUAL_FILE: ${EVENT_MANUAL_FILE:-manual-events.csv}
       EVENT_MANUAL_NOTIFY: ${EVENT_MANUAL_NOTIFY:-false}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
-      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-mock}
-      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
-      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
-      TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM:-whatsapp:+14155238886}
     ports: ["${API_PORT:-8082}:8080"]
   frontend:
     build:

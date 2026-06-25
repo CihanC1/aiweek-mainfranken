@@ -15,9 +15,8 @@ public class SearchService {
         if (q.isBlank()) return List.of();
         AppUser user = userId == null ? null : AppUser.findById(userId);
         var history = new UserSearch(); history.user=user; history.query=query.trim(); history.normalizedQuery=q; history.persist();
-        String like="%"+q+"%";
-        return Event.<Event>find("select distinct e from Event e left join e.tags t where e.status <> ?1 and e.startAt >= ?2 and (lower(e.title) like ?3 or lower(coalesce(e.organizer,'')) like ?3 or lower(coalesce(e.description,'')) like ?3 or lower(e.city) like ?3 or lower(cast(e.eventType as string)) like ?3 or lower(t) like ?3) order by e.startAt", EventStatus.ARCHIVED, OffsetDateTime.now(), like)
-                .list().stream().map(EventView::from).toList();
+        return Event.<Event>find("status <> ?1 and startAt >= ?2 order by startAt", EventStatus.ARCHIVED, OffsetDateTime.now())
+                .list().stream().filter(e -> matches(e,q)).map(EventView::from).toList();
     }
     public List<UUID> usersWithSameQuery(String query, UUID exclude) {
         var normalized=normalize(query);
@@ -25,4 +24,13 @@ public class SearchService {
                 .map(s->s.user.id).filter(id->!id.equals(exclude)).distinct().toList();
     }
     public String normalize(String query) { return query == null ? "" : query.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+"," "); }
+    private boolean matches(Event e, String q) {
+        var haystack = String.join(" ", List.of(Objects.toString(e.title,""),Objects.toString(e.organizer,""),Objects.toString(e.description,""),Objects.toString(e.city,""),Objects.toString(e.eventType,""))).toLowerCase(Locale.ROOT);
+        if (haystack.contains(q)) return true;
+        var terms = new LinkedHashSet<String>();
+        if (e.tags != null) terms.addAll(e.tags.stream().map(this::normalize).toList());
+        if (e.categories != null) terms.addAll(e.categories.stream().map(this::normalize).toList());
+        for (var term : terms) if (term.contains(q) || term.startsWith(q) || q.startsWith(term)) return true;
+        return false;
+    }
 }

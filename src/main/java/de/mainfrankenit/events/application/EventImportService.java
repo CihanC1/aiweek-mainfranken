@@ -30,6 +30,7 @@ public class EventImportService {
     private static final int MAX_PAGES_PER_SOURCE = 10;
     private static final Set<String> MEANINGFUL_NOTIFICATION_FIELDS = Set.of("title","eventType","startAt","endAt","locationName","city","address","attendanceMode","status");
     @Inject EventNormalizer normalizer;
+    @Inject TaxonomyService taxonomy;
     @Inject HttpPageFetcher fetcher;
     @Inject ContentHasher hasher;
     @Inject LinkDiscoveryService links;
@@ -98,6 +99,7 @@ public class EventImportService {
         run.sourceCount=sourceCount; run.discoveredCount=discovered; run.createdCount=created; run.updatedCount=updated; run.unchangedCount=unchanged; run.failedCount=errors.size();
         run.status=errors.isEmpty()?ImportRunStatus.SUCCESS:(sourceCount==errors.size()?ImportRunStatus.FAILED:ImportRunStatus.PARTIAL);
         run.finishedAt=Instant.now();
+        taxonomy.reclassifyExistingEvents();
         return new ImportResult(sourceCount, discovered, created, updated, unchanged, errors);
     }
 
@@ -110,16 +112,17 @@ public class EventImportService {
     @Transactional
     public int upsert(EventDraft raw, boolean notify) {
         var d = normalizer.normalize(raw);
+        var classification = taxonomy.classify(d);
         var fingerprint = normalizer.fingerprint(d);
         Event event = Event.find("fingerprint = ?1 or sourceUrl = ?2", fingerprint, d.sourceUrl()).firstResult();
         if (event == null) {
             event = new Event();
-            apply(event, d, fingerprint);
+            apply(event, d, fingerprint, classification);
             event.persist();
             if (notify) notifications.eventCreated(event);
             return 1;
         }
-        var changes = changes(event, d);
+        var changes = changes(event, d, classification);
         if (event.status == EventStatus.CANCELLED || event.status == EventStatus.ARCHIVED) {
             changes.put("status", new String[]{event.status.name(), EventStatus.ACTIVE.name()});
         }
@@ -129,21 +132,22 @@ public class EventImportService {
             var values = entry.getValue(); var change = new EventChange(); change.event=event; change.changedField=entry.getKey();
             change.oldValue=values[0]; change.newValue=values[1]; change.detectedAt=Instant.now(); change.persist();
         }
-        apply(event, d, fingerprint); event.status = EventStatus.UPDATED;
+        apply(event, d, fingerprint, classification); event.status = EventStatus.UPDATED;
         if (notify && changes.keySet().stream().anyMatch(MEANINGFUL_NOTIFICATION_FIELDS::contains)) notifications.eventUpdated(event, changes.keySet());
         return 2;
     }
 
-    private void apply(Event e, EventDraft d, String fp) {
-        e.title=d.title(); e.organizer=d.organizer(); e.description=d.description(); e.tags.clear(); e.tags.addAll(d.tags());
+    private void apply(Event e, EventDraft d, String fp, TaxonomyService.Classification classification) {
+        e.title=d.title(); e.organizer=d.organizer(); e.description=d.description(); e.tags.clear(); e.tags.addAll(classification.tags());
+        e.categories.clear(); e.categories.addAll(classification.categories());
         e.eventType=d.eventType(); e.startAt=d.startAt(); e.endAt=d.endAt(); e.locationName=d.locationName(); e.city=d.city(); e.address=d.address();
         e.attendanceMode=d.attendanceMode(); e.sourceUrl=d.sourceUrl(); e.sourceName=d.sourceName(); e.externalEventId=d.externalEventId();
         e.fingerprint=fp; e.lastCheckedAt=Instant.now(); if (e.status == null) e.status=EventStatus.ACTIVE;
     }
-    private Map<String,String[]> changes(Event e, EventDraft d) {
+    private Map<String,String[]> changes(Event e, EventDraft d, TaxonomyService.Classification classification) {
         var m = new LinkedHashMap<String,String[]>();
         compareText(m,"title",e.title,d.title()); compareText(m,"organizer",e.organizer,d.organizer()); compareText(m,"description",e.description,d.description());
-        compareTags(m,"tags",e.tags,d.tags()); compare(m,"eventType",e.eventType,d.eventType()); compareTime(m,"startAt",e.startAt,d.startAt());
+        compareTags(m,"tags",e.tags,classification.tags()); compareTags(m,"categories",e.categories,classification.categories()); compare(m,"eventType",e.eventType,d.eventType()); compareTime(m,"startAt",e.startAt,d.startAt());
         compareTime(m,"endAt",e.endAt,d.endAt()); compareText(m,"locationName",e.locationName,d.locationName()); compareText(m,"city",e.city,d.city());
         compareText(m,"address",e.address,d.address()); compare(m,"attendanceMode",e.attendanceMode,d.attendanceMode());
         return m;
