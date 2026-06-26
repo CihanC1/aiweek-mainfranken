@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:17-alpine
-    networks: [app]
+    networks: [default]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mainfrankenit}
       POSTGRES_USER: ${POSTGRES_USER:-mainfrankenit}
@@ -15,7 +15,7 @@ services:
       retries: 15
   backend:
     build: .
-    networks: [app]
+    networks: [default]
     env_file:
       - .env
     depends_on:
@@ -44,11 +44,11 @@ services:
       context: ./frontend
       args:
         VITE_API_URL: ${VITE_API_URL-}
-    networks: [app]
+    networks: [default]
     depends_on: [backend]
     ports: ["3000:80"]
 networks:
-  app:
+  default:
     name: mainfranken_default
 volumes:
   postgres_data:

@@ -36,5 +36,5 @@ public class AuthResource {
     private Response session(AuthService.Tokens t){return Response.ok(UserView.of(t.user())).header("Set-Cookie",cookie("mf_access",t.access(),"/",900)).header("Set-Cookie",cookie("mf_refresh",t.refresh(),"/api/auth",2592000)).build();}
     private String cookie(String name,String value,String path,int age){return name+"="+value+"; Path="+path+"; Max-Age="+age+"; HttpOnly; SameSite=Lax";}
     private String clear(String name,String path){return name+"=; Path="+path+"; Max-Age=0; HttpOnly; SameSite=Lax";}
-    private String link(String value){if(value==null)return null;var v=value.trim();return v.isBlank()?null:v;}
+    private String link(String value){if(value==null)return null;var v=value.trim();if(v.isBlank())return null;return v.matches("(?i)^https?://.*")?v:"https://"+v;}
 }

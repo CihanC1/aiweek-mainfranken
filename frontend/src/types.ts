@@ -6,7 +6,8 @@ export interface NotificationItem{id:string;eventId?:string;type:string;title:st
 export interface Recommendation{event:EventItem;score:number;group:'BEST'|'MEDIUM'|'RELATED';reasons:string[]}
 export interface ChatReply{sessionId:string;state:string;message:string;completed:boolean}
 export interface GroupMessage{id:string;userId?:string;author:string;role:'USER'|'ASSISTANT'|'SYSTEM';content:string;createdAt:string}
-export interface Group{id:string;eventId:string;name:string;memberIds:string[];messages:GroupMessage[]}
+export interface GroupMember{id:string;displayName:string;preferredCity?:string;interests:string[];joinedAt:string}
+export interface Group{id:string;eventId:string;name:string;memberIds:string[];members:GroupMember[];messages:GroupMessage[]}
 export interface PublicProfile{id:string;displayName:string;preferredCity?:string;interests:string[];profileLink1?:string;profileLink2?:string;profileLink3?:string;matchScore:number}
 export interface DirectMessage{id:string;senderId:string;recipientId:string;senderName:string;content:string;createdAt:string}
 export type MessageRequestStatus='PENDING'|'ACCEPTED'|'REJECTED';
