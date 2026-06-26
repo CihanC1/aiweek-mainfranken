@@ -19,13 +19,15 @@ import java.util.*;
 public class EventResource {
     @Inject EventImportService importer; @Inject SearchService search;
     @Inject AuthService auth;
-    @GET public List<EventView> list(@QueryParam("city")String city,@QueryParam("type")EventType type){
+    @GET public List<EventView> list(@QueryParam("city")String city,@QueryParam("type")EventType type,@QueryParam("includePast")@DefaultValue("false")boolean includePast){
         List<Event> events;
         var now = OffsetDateTime.now();
-        if(city==null&&type==null) events=Event.list("status <> ?1 and startAt >= ?2 order by startAt",EventStatus.ARCHIVED,now);
-        else if(city!=null&&type==null) events=Event.list("status <> ?1 and startAt >= ?2 and lower(city)=?3 order by startAt",EventStatus.ARCHIVED,now,city.toLowerCase(Locale.ROOT));
-        else if(city==null) events=Event.list("status <> ?1 and startAt >= ?2 and eventType=?3 order by startAt",EventStatus.ARCHIVED,now,type);
-        else events=Event.list("status <> ?1 and startAt >= ?2 and lower(city)=?3 and eventType=?4 order by startAt",EventStatus.ARCHIVED,now,city.toLowerCase(Locale.ROOT),type);
+        var dateClause=includePast?"":" and startAt >= ?2";
+        var order=includePast?" order by startAt desc":" order by startAt";
+        if(city==null&&type==null) events=includePast?Event.list("status <> ?1"+order,EventStatus.ARCHIVED):Event.list("status <> ?1"+dateClause+order,EventStatus.ARCHIVED,now);
+        else if(city!=null&&type==null) events=includePast?Event.list("status <> ?1 and lower(city)=?2"+order,EventStatus.ARCHIVED,city.toLowerCase(Locale.ROOT)):Event.list("status <> ?1"+dateClause+" and lower(city)=?3"+order,EventStatus.ARCHIVED,now,city.toLowerCase(Locale.ROOT));
+        else if(city==null) events=includePast?Event.list("status <> ?1 and eventType=?2"+order,EventStatus.ARCHIVED,type):Event.list("status <> ?1"+dateClause+" and eventType=?3"+order,EventStatus.ARCHIVED,now,type);
+        else events=includePast?Event.list("status <> ?1 and lower(city)=?2 and eventType=?3"+order,EventStatus.ARCHIVED,city.toLowerCase(Locale.ROOT),type):Event.list("status <> ?1"+dateClause+" and lower(city)=?3 and eventType=?4"+order,EventStatus.ARCHIVED,now,city.toLowerCase(Locale.ROOT),type);
         return events.stream().map(EventView::from).toList();
     }
     @GET @Path("/{id}") public EventView get(@PathParam("id")UUID id){Event e=Event.findById(id);if(e==null)throw new NotFoundException();return EventView.from(e);}
