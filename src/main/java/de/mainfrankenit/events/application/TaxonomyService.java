@@ -1,6 +1,7 @@
 package de.mainfrankenit.events.application;
 
 import de.mainfrankenit.events.domain.Event;
+import de.mainfrankenit.events.domain.EventStatus;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.transaction.Transactional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -70,6 +71,28 @@ public class TaxonomyService {
     public List<CategoryView> categories() {
         var grouped = new TreeMap<String, Set<String>>(String.CASE_INSENSITIVE_ORDER);
         for (var entry : entries()) grouped.computeIfAbsent(entry.category(), ignored -> new TreeSet<>(String.CASE_INSENSITIVE_ORDER)).add(entry.tag());
+        return grouped.entrySet().stream().map(e -> new CategoryView(e.getKey(), List.copyOf(e.getValue()))).toList();
+    }
+
+    public List<CategoryView> categoriesWithEventTags() {
+        var grouped = new TreeMap<String, Set<String>>(String.CASE_INSENSITIVE_ORDER);
+        var knownTerms = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
+        for (var entry : entries()) {
+            grouped.computeIfAbsent(entry.category(), ignored -> new TreeSet<>(String.CASE_INSENSITIVE_ORDER)).add(entry.tag());
+            knownTerms.add(key(entry.category()));
+            knownTerms.add(key(entry.tag()));
+        }
+
+        var eventTags = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
+        for (Event event : Event.<Event>list("status <> ?1", EventStatus.ARCHIVED)) {
+            if (event.tags == null) continue;
+            for (var tag : event.tags) {
+                var value = key(tag);
+                if (!value.isBlank() && !knownTerms.contains(value)) eventTags.add(value);
+            }
+        }
+        if (!eventTags.isEmpty()) grouped.put("Weitere Tags", eventTags);
+
         return grouped.entrySet().stream().map(e -> new CategoryView(e.getKey(), List.copyOf(e.getValue()))).toList();
     }
 

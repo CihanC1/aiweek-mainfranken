@@ -48,8 +48,8 @@ public class RecommendationService {
             if(value>0){topicScore+=value; matchedTopics.add(tag);}
         }
         if(topicScore>0){score+=Math.min(60,topicScore); reasons.add("passende Themen: "+String.join(", ",matchedTopics));}
-        if(p.city()!=null&&!p.city().isBlank()&&p.city().equalsIgnoreCase(e.city)){score+=20;reasons.add("preferred city");}
-        if(p.attendanceMode()!=null&&(p.attendanceMode()==e.attendanceMode||e.attendanceMode==AttendanceMode.HYBRID)){score+=15;reasons.add("attendance mode");}
+        if(p.city()!=null&&!p.city().isBlank()&&cityKey(p.city()).equals(cityKey(e.city))){score+=20;reasons.add("preferred city");}
+        if(p.attendanceMode()!=null&&attendanceMatches(p.attendanceMode(),e.attendanceMode)){score+=15;reasons.add("attendance mode");}
         if(p.eventTypes()!=null&&p.eventTypes().contains(e.eventType)){score+=15;reasons.add("event type");}
         long days=Duration.between(Instant.now(),e.startAt.toInstant()).toDays(); if(days>=0&&days<=14){score+=10;reasons.add("coming soon");}
         String group=score>=60?"BEST":score>=30?"MEDIUM":"RELATED";
@@ -99,5 +99,10 @@ public class RecommendationService {
     }
     private String norm(String value) {
         return value.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+"," ");
+    }
+    private String cityKey(String value) { return norm(value).replace("ü","ue").replace("ä","ae").replace("ö","oe").replace("ß","ss"); }
+    private boolean attendanceMatches(AttendanceMode preferred, AttendanceMode actual) {
+        if(preferred==actual||actual==AttendanceMode.HYBRID)return true;
+        return preferred==AttendanceMode.HYBRID&&actual==AttendanceMode.ONLINE;
     }
 }

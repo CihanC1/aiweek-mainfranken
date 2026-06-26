@@ -14,6 +14,6 @@ public class TaxonomyResource {
 
     @GET
     public List<TaxonomyService.CategoryView> categories() {
-        return taxonomy.categories();
+        return taxonomy.categoriesWithEventTags();
     }
 }
