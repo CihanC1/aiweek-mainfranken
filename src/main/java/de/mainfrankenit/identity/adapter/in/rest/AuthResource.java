@@ -6,6 +6,7 @@ import de.mainfrankenit.identity.application.UserService;
 import de.mainfrankenit.identity.domain.AppUser;
 import de.mainfrankenit.identity.domain.UserInterest;
 import de.mainfrankenit.identity.domain.UserRole;
+import de.mainfrankenit.recommendations.application.RecommendationService;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
@@ -17,6 +18,7 @@ import java.util.*;
 public class AuthResource {
     @Inject AuthService auth;
     @Inject UserService users;
+    @Inject RecommendationService recommendations;
     public record Register(@NotBlank @Size(min=2,max=80) String displayName,@NotBlank @Email String email,@NotBlank @Size(min=8,max=128) String password){}
     public record Login(@NotBlank @Email String email,@NotBlank String password){}
     public record Forgot(@NotBlank @Email String email){}
@@ -30,6 +32,7 @@ public class AuthResource {
     @POST @Path("/refresh") public Response refresh(@CookieParam("mf_refresh")String refresh){return session(auth.refresh(refresh));}
     @POST @Path("/logout") public Response logout(@CookieParam("mf_access")String access,@CookieParam("mf_refresh")String refresh){auth.logout(access,refresh);return Response.noContent().header("Set-Cookie",clear("mf_access","/")).header("Set-Cookie",clear("mf_refresh","/api/auth")).build();}
     @GET @Path("/me") public UserView me(@CookieParam("mf_access")String access){return UserView.of(auth.current(access));}
+    @GET @Path("/me/recommendations") public List<RecommendationService.Recommendation> meRecommendations(@CookieParam("mf_access")String access){return recommendations.forUser(auth.current(access).id);}
     @PATCH @Path("/me") @Transactional public UserView update(@CookieParam("mf_access")String access,@Valid UpdateProfile r){var u=auth.current(access);if(r.displayName!=null)u.displayName=r.displayName.trim();if(r.preferredCity!=null){var city=r.preferredCity.trim();u.preferredCity=city.isBlank()?null:city;}if(r.preferredEventTypes!=null){u.preferredEventTypes.clear();u.preferredEventTypes.addAll(r.preferredEventTypes);}u.preferredAttendanceMode=r.attendanceMode;if(r.interests!=null)users.replaceInterests(u,r.interests);u.profileLink1=link(r.profileLink1);u.profileLink2=link(r.profileLink2);u.profileLink3=link(r.profileLink3);return UserView.of(u);}
     @POST @Path("/forgot-password") public Map<String,String> forgot(@Valid Forgot r){String token=auth.forgot(r.email);var result=new LinkedHashMap<String,String>();result.put("message","Wenn ein Konto existiert, wurde ein Link erstellt.");if(token!=null)result.put("resetToken",token);return result;}
     @POST @Path("/reset-password") public Map<String,String> reset(@Valid Reset r){auth.reset(r.token,r.password);return Map.of("message","Passwort wurde aktualisiert.");}
